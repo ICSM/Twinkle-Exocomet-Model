@@ -14,23 +14,7 @@ Msol = 1.99e30 #kg
 Lsol = 6e24 #W
 pc = 3.086e16 #m
 au = 1.496e11 #m
-#Load limb darkening parameters
-from astropy.io import ascii
 
-#ldc_file = 'Claret2017_TESS_LDC.dat'
-#ldc_data = ascii.read(direc+ldc_file,delimiter=';',comment='#',fast_read=False)
-
-# a1 = ldc_data['a1'].data
-# a2 = ldc_data['a2'].data
-# a3 = ldc_data['a3'].data
-# a4 = ldc_data['a4'].data
-# ts = ldc_data['teff'].data
-# lg = ldc_data['logg'].data
-# zz = ldc_data['zfeh'].data
-
-#Insert process to select nearest LDC based on stellar properties
-
-a1,a2,a3,a4 = (0.5712,-0.1025,0.4745,-0.2657) #coefficients for 5750K, logg 4.5, FeH = 0.0, xi = 2 km/s
 
 #Define stellar parameters for modelling
 dstar = 10.0 #pc
@@ -38,6 +22,38 @@ tstar = 5770.0 #K
 rstar = 1.0 #R_sol
 mstar = 1.0 #M_sol
 lstar = 1.0 #L_sol
+
+#Load limb darkening parameters
+from astropy.io import ascii
+
+ldc_file = 'Claret2017_TESS_LDC.dat'
+ldc_data = ascii.read(direc+ldc_file,delimiter=';',comment='#',fast_read=False)
+
+#Insert process to select nearest LDC based on stellar properties
+def get_ldc(tstar,ldc_values):
+    
+    a1 = ldc_data['a1LDM'].data
+    a2 = ldc_data['a2LDM'].data
+    a3 = ldc_data['a3LDM'].data
+    a4 = ldc_data['a4LDM'].data
+    ts = ldc_data['Teff'].data
+    lg = ldc_data['logg'].data
+    #zz = ldc_data['Z'].data
+    #vt = ldc_data['L/HP'].data
+
+    if tstar < np.min(ts):
+        print("Stellar temperature below minimum in limb darkening grid (",ts[0],"), using lowest values in grid.")
+        return a1[0],a2[0],a3[0],a4[0]
+    elif tstar > np.max(ts):
+        print("Stellar temperature above maximum in limb darkening grid (",ts[-1],"), using highest values in grid.")
+        return a1[-1],a2[-1],a3[-1],a4[-1]
+    else:
+        delta = abs(np.asarray(ts) - tstar)
+        ndelta= np.argmin(delta)
+        return a1[ndelta],a2[ndelta],a3[ndelta],a4[ndelta]
+
+a1,a2,a3,a4 = get_ldc(tstar,ldc_data) #coefficients for 5750K, logg 4.5, FeH = 0.0, xi = 2 km/s
+
 
 #Define comet orbit parameters for modelling
 a = 0.05 #au
