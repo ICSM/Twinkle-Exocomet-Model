@@ -4,6 +4,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 
+from Twinkle import Exocomet
+
 direc = '/Users/jonty/mydata/exocomets/'
 
 #Constants
@@ -14,7 +16,6 @@ Msol = 1.99e30 #kg
 Lsol = 6e24 #W
 pc = 3.086e16 #m
 au = 1.496e11 #m
-
 
 #Define stellar parameters for modelling
 dstar = 10.0 #pc
