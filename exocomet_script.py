@@ -53,13 +53,13 @@ def get_ldc(tstar):
     else:
         
         f = interpolate.interp1d(ts,a1)
-        a1 = f(tstar)
+        a1int = f(tstar)
         f = interpolate.interp1d(ts,a2)
-        a2 = f(tstar)
+        a2int = f(tstar)
         f = interpolate.interp1d(ts,a3)
-        a3 = f(tstar)
+        a3int = f(tstar)
         f = interpolate.interp1d(ts,a4)
-        a4 = f(tstar)
+        a4int = f(tstar)
 
         return a1int,a2int,a3int,a4int
 
