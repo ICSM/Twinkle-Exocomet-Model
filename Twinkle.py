@@ -9,71 +9,135 @@ Created on Tue Jul  6 11:42:22 2021
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
-from astropy.models import Blackbody
 
 #Constants
-c = 3e8 #m/s
+h = 6.626e-34
+c = 299792458.0 # m/s
+k = 1.38e-23
+sb = 5.67e-8 #
+au     = 1.495978707e11 # m 
+pc     = 3.0857e16 # m
+lsol   = 3.828e26 # W
+rsol   = 6.96342e8 # m
+MEarth = 5.97237e24 # kg
 G = 6.67e-11
-Rsol = 6.9634e8 #m
+Rsol = 6.96342e8 # m
 Msol = 1.99e30 #kg
-Lsol = 6e24 #W
+Lsol = 3.828e26 #W
 pc = 3.086e16 #m
 au = 1.496e11 #m
+um = 1.e-6
+
+__all__ = ['Exocomet']
 
 class Exocomet:
-
+    
     def __init__(self):
-        print("Instantiated Twinkle exocomet model object.")
-        self.parameters = {}
-        self.sed_emit = 0.0
-        self.sed_scat = 0.0
-        self.sed_disc = 0.0 
-        self.sed_star = 0.0
-        self.sed_wave = 0.0
-
-    def read_star(self):
+        #Define stellar parameters for modelling
+        self.dstar = 10.0   # stellar distance in parsecs
+        self.lstar = 1.0    # Luminosity of the star in solar luminosities
+        self.rstar = 1.0    # Radius of the star in solar radii
+        self.mstar = 1.0    # Stellar mass in solar masses
+        self.tstar = 5770.0 # Stellar temperature in Kelvin
+        self.npix  = 401    # Number of pixels in stellar image
+        self.nstr  = 75     # Number of pixels in stellar radius
+        #Define exocomet parameters for modelling
+        self.a     = 5.0 # semi-major axis at point of transit in Rstar
+        self.b     = 0.0 # Impact parameter in fraction of Rstar
+        self.Rhead = 0.5 # Radius of the head in Rstar
+        self.Rtail = 2.0 # Radius of the tail in Rstar
+        self.tau_0 = 0.1 # Maximum opacity of the cometary cloud
+    
+    def planck_lam(wav, T):
         """
-        Function to read in a stellar photosphere model from the SVO database.
-        
-        Stellar photosphere model is assumed to have wavelengths in Angstroms,
-        and flux density in erg/s/cm2/A.
-        
-        The function will extrapolate to the longest wavelength required in the
-        model, if necessary.
-        
         Parameters
         ----------
-        star_params : Dictionary
-             Stellar parameters.
+        lam : float or array
+            Wavelengths in metres.
+        T : float
+            Temperature in Kelvin.
     
         Returns
         -------
-        wav_um : float array
-            Wavelengths in microns in ascending order.
-        flx_mjy : float array
-            Photospheric flux density in mJy in ascending order.
+        intensity : float or array
+            B(lam,T) W/m^2/m/sr
+        """
+        a = 2.0*h*c**2
+        b = h*c/(wav*k*T)
+        intensity = a/ ( (wav**5) * (np.exp(b) - 1.0) )
+        return intensity
     
-        
-        """
-        spectrum_file = self.parameters['model']
-        
-        data = ascii.read(spectrum_file,comment='#',names=['Wave','Flux'])
-        
-        rstar = self.parameters['rstar']
-        dstar = self.parameters['dstar']
-        
-        wavelengths =  data['Wave'].data #Angstroms
-        model_spect =  data['Flux'].data #Ergs/cm**2/s/A -> 10^-7 * 10^4 * 10^10 W/m^2/Hz/m
-        
-        wav_um = wavelengths * 1e-4
-        flx_mjy =  model_spect * (c/wavelengths**2) * 1e-3 * ((rstar*rsol)/ (dstar*pc))**2 #coversion to Flam units
-        
-        return wav_um,flx_mjy
+    def get_ldc(self):
 
-    def make_star(star_parameters,smodel='blackbody'):
         """
-        Function to either create a star using a blackbody, or read in a 
-        photosphere model.
+        Function to read in the limb darkening coefficients for a 4 parameter
+        model based on the Claret 2017 TESS LDCs.
+        
+        Parameters
+        ----------
+        tstar : float
+            stellar temperature (K)
+        
+        Returns
+        -------
+        ldc : float array
+            limb darkening coefficients
+        
+        """        
+        
+        from astropy.io import ascii
+        from scipy import interpolate
+    
+        #Load limb darkening parameters
+        ldc_file = 'Claret2017_TESS_LDC.dat'
+        converters = {'a1LSM' : [ascii.convert_numpy(np.float64)],\
+                      'a2LSM' : [ascii.convert_numpy(np.float64)],\
+                      'a3LSM' : [ascii.convert_numpy(np.float64)],\
+                      'a3LSM' : [ascii.convert_numpy(np.float64)],\
+                      'Teff'  : [ascii.convert_numpy(np.float64)],\
+                      'logg'  : [ascii.convert_numpy(np.float64)]}
+        ldc_data = ascii.read(ldc_file,delimiter=';',comment='#',format='basic',fast_reader='False',guess='False',data_start=3)
+        print(ldc_data)
+        a1 = np.asarray(ldc_data['a1LSM'].data)
+        a2 = np.asarray(ldc_data['a2LSM'].data)
+        a3 = np.asarray(ldc_data['a3LSM'].data)
+        a4 = np.asarray(ldc_data['a4LSM'].data)
+        ts = np.asarray(ldc_data['Teff'].data)
+        lg = np.asarray(ldc_data['logg'].data)
+        #zz = ldc_data['Z'].data
+        #vt = ldc_data['L/HP'].data
+        print(ts)
+        if self.tstar <= np.min(ts):
+            print("Stellar temperature below minimum in limb darkening grid (",ts[0],"), using lowest values in grid.")
+            return a1[0],a2[0],a3[0],a4[0]
+        elif self.tstar >= np.max(ts):
+            print("Stellar temperature above maximum in limb darkening grid (",ts[-1],"), using highest values in grid.")
+            return a1[-1],a2[-1],a3[-1],a4[-1]
+        else:
+            
+            f = interpolate.interp1d(ts,a1)
+            a1int = f(self.tstar)
+            f = interpolate.interp1d(ts,a2)
+            a2int = f(self.tstar)
+            f = interpolate.interp1d(ts,a3)
+            a3int = f(self.tstar)
+            f = interpolate.interp1d(ts,a4)
+            a4int = f(self.tstar)
+    
+            ldc = np.asarray([a1int,a2int,a3int,a4int])
+    
+            return ldc
+
+    def make_spec(self,lmin=0.5,lmax=2.43,resolution=180,smodel='blackbody',filename=None):
+        """
+        Function to create a star using a blackbody to approximate the 
+        photosphere.
+        
+        Parameters
+        ----------
+        
+        smodel : string
+            'blackbody' or 'spectrum'
         
         Returns
         -------
@@ -83,49 +147,213 @@ class Exocomet:
             Photospheric flux density in mJy in ascending order.
     
         """
-        if smodel != 'blackbody' and smodel != 'spectrum' :
-            print("Input 'stype' must be one of 'blackbody' or 'spectrum'.")
-    
-        if smodel == 'blackbody':
-            lstar = self.parameters['lstar']
-            rstar = self.parameters['rstar']
-            tstar = self.parameters['tstar']
-            dstar = self.parameters['dstar']
-    
-            lmin = self.parameters['lmin']
-            lmax = self.parameters['lmax']
-            nwav = int(self.parameters['nwav'])
-            
-            wavelengths = np.logspace(np.log10(lmin),np.log10(lmax),num=nwav,base=10.0,endpoint=True) #um
-            photosphere = RTModel.planck_lam(wavelengths*um,tstar) # W/m2/sr/m
-            photosphere = np.pi * photosphere * ((rstar*rsol)/(dstar*pc))**2 # W/m2/m
-            
-            lphot = RTModel.calc_luminosity(rstar,tstar)
-            print("Stellar model has a luminosity of: ",lphot," L_sol")
-            
-            photosphere = (lstar/lphot)*photosphere
-            
-        elif smodel == 'spectrum':
-            lambdas,photosphere = read_star(self)
-    
-            lmin = self.parameters['lmin']
-            lmax = self.parameters['lmax']
-            nwav = int(self.parameters['nwav'])
-            
-            wavelengths = np.logspace(np.log10(lmin),np.log10(lmax),num=nwav,base=10.0,endpoint=True)
-    
-            if np.max(wavelengths) > np.max(lambdas):
-                interp_lam_arr = np.logspace(np.log10(lambdas[-1]),np.log10(1.1*wavelengths[-1]),num=nwav,base=10.0,endpoint=True)
-                interp_pht_arr = photosphere[-1]*(lambdas[-1]/interp_lam_arr)**2
-                photosphere = np.append(photosphere,interp_pht_arr)
-                lambdas = np.append(lambdas,interp_lam_arr)
+        
+        if lmax == lmin:
+            self.lmin = lmin
+            self.lmax = lmax
+            self.resolution = 1
+            self.nwav = 1
+ 
+            if smodel == 'blackbody':          
+                wavelengths = self.lmin #um
+                photosphere = Exocomet.planck_lam(wavelengths*um,self.tstar) # W/m2/sr/m
+                photosphere = np.pi * photosphere * ((self.rstar*Rsol)/(self.dstar*pc))**2 # W/m2/m            
+                photosphere = photosphere*1e26*(wavelengths*um)**2 /c #convert to Jy
                 
-            photosphere = np.interp(wavelengths,lambdas,photosphere)
-        
-        elif smodel == 'function':
-            print("starfish model not yet implemented.")
-        
-        self.sed_wave = wavelengths 
-        self.sed_star = photosphere*1e3*1e26*(self.sed_wave*um)**2 /c
+            elif smodel == 'spectrum':
+                lambdas,photosphere = Exocomet.read_star(filename)
+                
+                wavelengths = self.lmin
+                photosphere = np.interp(wavelengths,lambdas,photosphere)*1e26*(wavelengths*um)**2 /c #convert to Jy
+    
+        else: 
+            nwav = int( (lmax - lmin) / ((lmin + 0.5*(lmax-lmin)) / resolution) ) # Resolution = lambda / dlambda
+            
+            self.lmin = lmin 
+            self.lmax = lmax
+            self.resolution = resolution
+            self.nwav = nwav
+            
+            if smodel == 'blackbody':          
+                wavelengths = np.logspace(np.log10(lmin),np.log10(lmax),num=nwav,base=10.0,endpoint=True) #um
+                photosphere = Exocomet.planck_lam(wavelengths*um,self.tstar) # W/m2/sr/m
+                photosphere = np.pi * photosphere * ((self.rstar*Rsol)/(self.dstar*pc))**2 # W/m2/m            
+                photosphere = photosphere*1e26*(wavelengths*um)**2 /c #convert to Jy
+                
+            elif smodel == 'spectrum':
+                lambdas,photosphere = Exocomet.read_star(filename)
+                
+                wavelengths = np.logspace(np.log10(lmin),np.log10(lmax),num=nwav,base=10.0,endpoint=True)
+                photosphere = np.interp(wavelengths,lambdas,photosphere)*1e26*(wavelengths*um)**2 /c #convert to Jy
+            
+        self.wave = wavelengths
+        self.flux = photosphere
         
         return wavelengths, photosphere
+    
+    def read_star(self,filename):
+        """
+        Function to read a VSO stellar atmopshere from an ascii file.
+        
+        Parameters
+        ----------
+        filename : string
+            filename of the stellar atmosphere model
+        star : object
+            object containing stellar parameters
+            
+        Returns 
+        -------
+        wave : 1D float array
+            wavelengths in angstroms
+        
+        flux : 1D float array
+            stellar photosphere model, fluxes in ergs/cm2/Hz/s.
+        """
+        
+        data = ascii.read(filename,comment='#',names=['Wave','Flux'])
+                
+        wavelengths =  data['Wave'].data #Angstroms
+        model_spect =  data['Flux'].data #Ergs/cm**2/s/A -> 10^-7 * 10^4 * 10^10 W/m^2/Hz/m
+        
+        wave = wavelengths * 1e-4 # um
+        flux = model_spect * (c/wavelengths**2) * 1e3 * ((self.rstar*Rsol)/ (self.dstar*pc))**2 #coversion to Flam units
+        
+        return wave, flux
+    
+    def make_imgs(self,ldc,npix=401,nstr=75):
+        """
+        Function to make stellar surface image for occulation calculations.
+        
+        Parameters
+        ----------
+        ldc : 1D float array 
+            limb darkening coefficients
+        
+        npix : integer
+            total size of the image for the stellar disc 
+        
+        nstr : integer
+            radius of the star in pixels 
+        
+        Returns
+        -------
+        intensity : 2D float array
+            npix by npix image with limb darkened stellar surface, radius nstr.
+
+        """
+        
+        if npix != self.npix:
+            self.npix = npix
+        if nstr != self.nstr:
+            self.nstr = nstr
+        
+        xg = np.arange(npix) - (npix/2)
+        yg = np.arange(npix) - (npix/2)
+        x,y = np.meshgrid(xg,yg)
+        r = (x**2 + y**2)**0.5
+        a = np.where(r < nstr)
+        mu = np.zeros(r.shape)
+        ld = np.zeros(r.shape)
+        mu[a] = np.abs((r[a] - nstr) / nstr)
+        ld[a] = 1. - ldc[0]*(1.- mu[a]**0.5) - ldc[1]*(1.- mu[a]) - ldc[2]*(1.- mu[a]**1.5) - ldc[3]*(1.- mu[a]**2) 
+
+        intensity = ld / np.sum(ld)
+        
+        self.ldimage = intensity
+        
+        return intensity
+                    
+    def make_transit(self,intensity):
+        """
+        
+
+        Parameters
+        ----------
+        intensity : 2D float array
+           normalized array containing the limb-darkened stellar disc.
+        spectrum : 1D float array
+            fluxes and wavelengths for the observation.
+        comet_properties : tuple
+            orbital properties of comet.
+        star_properties : tuple
+            stellar parameters - dstar, lstar, rstar, tstar, npix, nstr.
+
+        Returns
+        -------
+        None.
+
+        """
+        image_width = ((star.npix/star.nstr)*star.rstar*Rsol)
+        pixel_width = image_width/star.npix
+        comet_moves = self.vorb*self.timestep
+        dx = comet_moves/pixel_width
+        nstep = int(star.npix/dx)
+        
+        if dx < 0.5 :
+            print("Comet moves < 0.5 pixels in image per iteration. Consider using a smaller image or increasing the timestep.")
+            
+        if nstep < 10: 
+            print("Fewer than 10 realizations across the eclipse event. Consider using a larger image or decreasing the timestep.")
+    
+        nimg = 0
+        fig2 = plt.figure()
+        ims = []
+        overlap = np.where(intensity > 0)
+        
+        xc = 0
+        yc = self.b*star.nstr
+        
+        lightcurve = []
+        
+        while (xc < star.npix) or (overlap[0].size > 0) :
+            xt = np.arange(star.npix) - xc
+            yt = np.arange(star.npix) - yc
+            u,v = np.meshgrid(xt,yt)
+            rc = (u**2 + v**2)**0.5
+            cloud = np.zeros(rc.shape)
+            
+            #Front side
+            a = np.where(u >= 0)
+            cloud[a] = self.tau_0*np.e**(-0.5*((rc[a])/self.nhead)**2)
+            #Tail side
+            a = np.where(u < 0)
+            cloud[a] = self.tau_0*np.e**(-0.5*( ( (u[a]/self.ntail)**2 + (v[a]/self.nhead)**2)**0.5 )**2)
+            
+            overlap = np.where((star.ldimage != 0)&(cloud != 0))
+            
+            #print(xc, npix)
+            #If the comet is not covering the star, then no eclipse (yet)
+        
+            
+            if overlap[0].size == 0:
+                transit = star.ldimage*star.flux[wv]      
+                
+                lightcurve.append(1.0)
+                
+                ims.append((plt.imshow(transit,cmap='plasma',vmin=0.0,vmax=np.max(transit),origin='lower'),))
+                    
+            if overlap[0].size != 0:
+                transit = star.ldimage*star.flux - (cloud*star.ldimage)
+                
+                lightcurve.append(np.sum(transit)/np.sum(star.ldimage*star.flux))
+                
+                ims.append((plt.imshow(transit,cmap='plasma',vmin=0.0,vmax=np.max(ld),origin='lower'),))
+            
+            xc = xc + dx
+            nimg = nimg+1
+    
+        im_ani = animation.ArtistAnimation(fig2, ims, interval=50, repeat_delay=3000,
+            blit=True)
+        im_ani.save('exocomet_test_ani.mp4', metadata={'artist':'J.P.Marshall'})
+        plt.close()
+        plt.clf()
+        #Plot eclipse
+        nmin = np.argmin(intensity)
+        plt.plot(180.*(np.arange(0,3*nmin) - nmin),lightcurve[0:3*nmin])
+        plt.xlabel("Time (s)")
+        plt.ylabel("Relative intensity (arb. units)")
+        plt.savefig('exocomet_test_transit.png',dpi=200,overwrite=True)
+        plt.close()
+
+    
