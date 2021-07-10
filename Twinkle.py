@@ -46,7 +46,7 @@ class Exocomet:
         self.b     = 0.0 # Impact parameter in fraction of Rstar
         self.Rhead = 0.5 # Radius of the head in Rstar
         self.Rtail = 2.0 # Radius of the tail in Rstar
-        self.tau_0 = 0.1 # Maximum opacity of the cometary cloud
+        self.tau_0 = 0.5 # Maximum opacity of the cometary cloud
     
     def planck_lam(wav, T):
         """
@@ -97,7 +97,7 @@ class Exocomet:
                       'Teff'  : [ascii.convert_numpy(np.float64)],\
                       'logg'  : [ascii.convert_numpy(np.float64)]}
         ldc_data = ascii.read(ldc_file,delimiter=';',comment='#',format='basic',fast_reader='False',guess='False',data_start=3)
-        print(ldc_data)
+        
         a1 = np.asarray(ldc_data['a1LSM'].data)
         a2 = np.asarray(ldc_data['a2LSM'].data)
         a3 = np.asarray(ldc_data['a3LSM'].data)
@@ -106,7 +106,7 @@ class Exocomet:
         lg = np.asarray(ldc_data['logg'].data)
         #zz = ldc_data['Z'].data
         #vt = ldc_data['L/HP'].data
-        print(ts)
+        
         if self.tstar <= np.min(ts):
             print("Stellar temperature below minimum in limb darkening grid (",ts[0],"), using lowest values in grid.")
             return a1[0],a2[0],a3[0],a4[0]
@@ -264,31 +264,26 @@ class Exocomet:
         
         return intensity
                     
-    def make_transit(self,intensity):
+    def make_transit(self):
         """
         
 
         Parameters
         ----------
-        intensity : 2D float array
-           normalized array containing the limb-darkened stellar disc.
-        spectrum : 1D float array
-            fluxes and wavelengths for the observation.
-        comet_properties : tuple
-            orbital properties of comet.
-        star_properties : tuple
-            stellar parameters - dstar, lstar, rstar, tstar, npix, nstr.
+        None.
 
         Returns
         -------
         None.
 
         """
-        image_width = ((star.npix/star.nstr)*star.rstar*Rsol)
-        pixel_width = image_width/star.npix
+        image_width = ((self.npix/self.nstr)*self.rstar*Rsol)
+        pixel_width = image_width/self.npix
         comet_moves = self.vorb*self.timestep
         dx = comet_moves/pixel_width
-        nstep = int(star.npix/dx)
+        nstep = int(self.npix/dx)
+        nhead = int(self.Rhead*self.nstr)
+        ntail = int(self.Rtail*self.nstr)
         
         if dx < 0.5 :
             print("Comet moves < 0.5 pixels in image per iteration. Consider using a smaller image or increasing the timestep.")
@@ -299,46 +294,47 @@ class Exocomet:
         nimg = 0
         fig2 = plt.figure()
         ims = []
-        overlap = np.where(intensity > 0)
+        overlap = np.where(self.ldimage > 0)
         
         xc = 0
-        yc = self.b*star.nstr
+        yc = self.b*self.nstr + self.npix/2
         
         lightcurve = []
         
-        while (xc < star.npix) or (overlap[0].size > 0) :
-            xt = np.arange(star.npix) - xc
-            yt = np.arange(star.npix) - yc
+        while (xc < self.npix) or (overlap[0].size > 0) :
+            xt = np.arange(self.npix) - xc
+            yt = np.arange(self.npix) - yc
             u,v = np.meshgrid(xt,yt)
             rc = (u**2 + v**2)**0.5
             cloud = np.zeros(rc.shape)
             
             #Front side
             a = np.where(u >= 0)
-            cloud[a] = self.tau_0*np.e**(-0.5*((rc[a])/self.nhead)**2)
+            cloud[a] = self.tau_0*np.e**(-0.5*((rc[a])/nhead)**2)
             #Tail side
             a = np.where(u < 0)
-            cloud[a] = self.tau_0*np.e**(-0.5*( ( (u[a]/self.ntail)**2 + (v[a]/self.nhead)**2)**0.5 )**2)
+            cloud[a] = self.tau_0*np.e**(-0.5*( ( (u[a]/ntail)**2 + (v[a]/nhead)**2)**0.5 )**2)
             
-            overlap = np.where((star.ldimage != 0)&(cloud != 0))
+            overlap = np.where((self.ldimage*self.flux >= 1e-9)&(cloud >= 1e-9))
             
-            #print(xc, npix)
             #If the comet is not covering the star, then no eclipse (yet)
         
             
             if overlap[0].size == 0:
-                transit = star.ldimage*star.flux[wv]      
+                #print(xc,yc,overlap[0].size,np.min(cloud),np.max(cloud))
+                transit = self.ldimage*self.flux
                 
                 lightcurve.append(1.0)
                 
-                ims.append((plt.imshow(transit,cmap='plasma',vmin=0.0,vmax=np.max(transit),origin='lower'),))
+                ims.append((plt.imshow(transit,cmap='plasma',vmin=0.0,vmax=np.max(self.ldimage*self.flux),origin='lower'),))
                     
             if overlap[0].size != 0:
-                transit = star.ldimage*star.flux - (cloud*star.ldimage)
+                #print(xc,yc,overlap[0].size,np.min(cloud),np.max(cloud))
+                transit = self.ldimage*self.flux - (cloud*(self.flux*self.ldimage))
                 
-                lightcurve.append(np.sum(transit)/np.sum(star.ldimage*star.flux))
+                lightcurve.append(np.sum(transit)/np.sum(self.ldimage*self.flux))
                 
-                ims.append((plt.imshow(transit,cmap='plasma',vmin=0.0,vmax=np.max(ld),origin='lower'),))
+                ims.append((plt.imshow(transit,cmap='plasma',vmin=0.0,vmax=np.max(self.ldimage*self.flux),origin='lower'),))
             
             xc = xc + dx
             nimg = nimg+1
@@ -349,11 +345,11 @@ class Exocomet:
         plt.close()
         plt.clf()
         #Plot eclipse
-        nmin = np.argmin(intensity)
+        nmin = np.argmin(lightcurve)
         plt.plot(180.*(np.arange(0,3*nmin) - nmin),lightcurve[0:3*nmin])
         plt.xlabel("Time (s)")
         plt.ylabel("Relative intensity (arb. units)")
-        plt.savefig('exocomet_test_transit.png',dpi=200,overwrite=True)
+        plt.savefig('exocomet_test_transit.png',dpi=200)
         plt.close()
 
     
