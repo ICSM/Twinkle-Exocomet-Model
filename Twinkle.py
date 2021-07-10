@@ -7,8 +7,7 @@ Created on Tue Jul  6 11:42:22 2021
 """
 
 import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib.animation as animation
+
 
 #Constants
 h = 6.626e-34
@@ -277,6 +276,9 @@ class Exocomet:
         None.
 
         """
+        import matplotlib.pyplot as plt
+        import matplotlib.animation as animation
+        
         image_width = ((self.npix/self.nstr)*self.rstar*Rsol)
         pixel_width = image_width/self.npix
         comet_moves = self.vorb*self.timestep
@@ -352,4 +354,98 @@ class Exocomet:
         plt.savefig('exocomet_test_transit.png',dpi=200)
         plt.close()
 
+    def read_optical_constants(self,filename):
+        """
+        Function to read in optical constants from a text file.
+        
+        Returns
+        -------
+        dl : float array
+            Wavelength array of dust optical constants in microns.
+        dn : float array
+            Real part of refractive index of dust optical constants.
+        dk : float array
+            Imaginary part of refractive index of dust optical constants.
     
+        
+        """    
+        from astropy.io import ascii
+        
+        data = ascii.read(filename,comment='#')
+        
+        dl = data["col1"].data
+        dn = data["col2"].data
+        dk = data["col3"].data
+        
+        dust_n = np.interp(self.wave,dl,dn)
+        dust_k = np.interp(self.wave,dl,dk)        
+        dust_nk = dust_n - 1j*np.abs(dust_k)
+        
+        self.oc_nk  = dust_nk
+
+    def calculate_opacity(self):
+        """
+        Function to calculate the qabs,qsca values for the grains in the model.
+
+        Returns
+        -------
+        None.
+
+        """
+        
+        import miepython.miepython as mpy
+        
+        x = 2.*np.pi*self.agrain/self.wave
+        qext, qsca, qback, g = mpy.mie(self.oc_nk,x)
+        
+        self.qabs = qext - qsca
+        self.mgrain = (3.3*(4./3.)*np.pi*(self.agrain*1e-4)**3) 
+        self.kappa = np.pi*(self.agrain*1e-4)**2*self.qabs / self.mgrain
+        
+    def calculate_mdust(self):
+        """
+        Function to create a 2D array of the comet, and calculate the mass
+        required to produce the extinction based on the peak extinction.
+
+        Returns
+        -------
+        None.
+
+        """
+        
+        pix_wide = self.rstar*Rsol/self.nstr
+        pix_area = pix_wide**2
+        pix_volume = pix_area*1e4*self.dstar*pc*1e2 #in cm^2
+        
+        nhead = self.Rhead*self.nstr
+        ntail = self.Rtail*self.nstr
+        
+        nx = int((3*nhead+3*ntail)+1)
+        ny = int(6*nhead +1)
+        
+        comet_model = np.array((nx,ny))
+        
+        xc = 3*ntail
+        yc = 3*nhead
+        
+        xt = np.arange(self.npix) - xc
+        yt = np.arange(self.npix) - yc
+        u,v = np.meshgrid(xt,yt)
+        rc = (u**2 + v**2)**0.5
+        comet_model = np.zeros(rc.shape)
+        
+        #Front side
+        a = np.where(u >= 0)
+        comet_model[a] = self.tau_0*np.e**(-0.5*((rc[a])/nhead)**2)
+        #Tail side
+        a = np.where(u < 0)
+        comet_model[a] = self.tau_0*np.e**(-0.5*( ( (u[a]/ntail)**2 + (v[a]/nhead)**2)**0.5 )**2)
+        
+        #this bit is in cgs
+        rho = np.log(comet_model)/(-1.*self.kappa)/(self.dstar*pc*1e2)
+        
+        mass = np.sum(rho*pix_volume)*1e-3 / MEarth #cloud mass is in grams, Earth mass in kg
+        
+        plt.imshow(comet_model)
+        
+        self.mdust = mass

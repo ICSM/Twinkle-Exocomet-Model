@@ -43,6 +43,11 @@ model.tau_0 = 1.0 #Maximum opacity of dust cloud
 #Define comet orbit parameters for modelling
 model.vorb = (2.*G*model.mstar*Msol /(model.a*rsol) )**0.5 # relative velcoity to move cloud between timesteps
 model.timestep = 180.0 #seconds - sampling of time series
+model.agrain = 1.0 #grain size of dust in um
 
 
+#Read in dust properties, caclulate opacity
+Exocomet.read_optical_constants(model,'astrosil.lnk')
+Exocomet.calculate_opacity(model)
 Exocomet.make_transit(model)
+Exocomet.calculate_mdust(model)
