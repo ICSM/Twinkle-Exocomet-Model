@@ -445,7 +445,8 @@ class Exocomet:
         rho = np.log(comet_model)/(-1.*self.kappa)/(self.dstar*pc*1e2)
         
         mass = np.sum(rho*pix_volume)*1e-3 / MEarth #cloud mass is in grams, Earth mass in kg
-        
-        plt.imshow(comet_model)
+
+        #import matplotlib.pyplot as plt
+        #plt.imshow(comet_model,origin='lower')
         
         self.mdust = mass
